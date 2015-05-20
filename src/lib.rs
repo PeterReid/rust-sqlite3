@@ -207,21 +207,21 @@ pub trait ResultRowAccess {
     /// # Panic
     ///
     /// Panics if there is no such column or value.
-    fn get<I: RowIndex + Display + Clone, T: FromSql>(&mut self, idx: I) -> T;
+    fn get<'a, I: RowIndex + Display + Clone, T: FromSql<'a>>(&'a mut self, idx: I) -> T;
 
     /// Try to get `T` type result value from `idx`th column of a row.
-    fn get_opt<I: RowIndex + Display + Clone, T: FromSql>(&mut self, idx: I) -> SqliteResult<T>;
+    fn get_opt<'a, I: RowIndex + Display + Clone, T: FromSql<'a>>(&'a mut self, idx: I) -> SqliteResult<T>;
 }
 
 impl<'res, 'row> ResultRowAccess for core::ResultRow<'res, 'row> {
-    fn get<I: RowIndex + Display + Clone, T: FromSql>(&mut self, idx: I) -> T {
+    fn get<'a, I: RowIndex + Display + Clone, T: FromSql<'a>>(&'a mut self, idx: I) -> T {
         match self.get_opt(idx.clone()) {
             Ok(ok) => ok,
             Err(err) => panic!("retrieving column {}: {}", idx, err)
         }
     }
 
-    fn get_opt<I: RowIndex + Display + Clone, T: FromSql>(&mut self, idx: I) -> SqliteResult<T> {
+    fn get_opt<'a, I: RowIndex + Display + Clone, T: FromSql<'a>>(&'a mut self, idx: I) -> SqliteResult<T> {
         match idx.idx(self) {
             Some(idx) => FromSql::from_sql(self, idx),
             None => Err(SqliteError {
