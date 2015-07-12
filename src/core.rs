@@ -782,9 +782,14 @@ pub struct Value {
     handle: *mut ffi::sqlite3_value
 }
 impl Value {
-    /// Interpret this value as a f64
+    /// Interpret this value as an f64
     pub fn as_f64(&self) -> f64 {
         (unsafe { ffi::sqlite3_value_double(self.handle) }) as f64
+    }
+    
+    /// Interpret this value as an i64
+    pub fn as_i64(&self) -> i64 {
+        (unsafe { ffi::sqlite3_value_int64(self.handle) }) as i64
     }
 }
 
