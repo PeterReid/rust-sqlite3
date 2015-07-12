@@ -31,6 +31,7 @@
 //!         let mut stmt = try!(conn.prepare(
 //!             "insert into items (id, description, price)
 //!            values (1, 'stuff', 10)"));
+//!            values (1, 'stuff', 10)"));
 //!         let mut results = stmt.execute();
 //!         match try!(results.step()) {
 //!             None => (),
@@ -195,6 +196,7 @@ fn maybe<T>(choice: bool, x: T) -> Option<T> {
     if choice { Some(x) } else { None }
 }
 
+
 use std::ffi::NulError;
 impl From<NulError> for SqliteError {
     fn from(_: NulError) -> SqliteError {
@@ -203,6 +205,16 @@ impl From<NulError> for SqliteError {
             desc: "Sql string contained an internal 0 byte",
             detail: None
         }
+    }
+}
+
+pub trait FunctionCallable {
+    fn handle(&self, args: &[Value]);
+}
+
+impl<F> FunctionCallable for F where F: Fn(&[Value]), F: Sync + Send {
+    fn handle(&self, args: &[Value]) {
+        self(args)
     }
 }
 
@@ -344,6 +356,46 @@ impl DatabaseConnection {
     /// with the `ffi` module.
     pub unsafe fn expose(&mut self) -> *mut ffi::sqlite3 {
         self.db.handle
+    }
+    
+    /// Create a function to be called from SQL
+    pub fn create_function<F: Fn(&Context, &[Value]) + 'static>(
+        &mut self, 
+        name: &str, 
+        narg: usize, 
+        f: &F,
+    ) -> SqliteResult<()> 
+    {
+        extern "C" fn run_function<F: Fn(&Context, &[Value]) + 'static>(
+            context: *mut ffi::sqlite3_context,
+            arg_count: ::libc::c_int,
+            args: *mut *mut ffi::sqlite3_value
+        ) {
+            let data = unsafe { ffi::sqlite3_user_data(context) };
+            
+            let f: &F = unsafe { mem::transmute(data) };
+            
+            let args: *const Value = unsafe { mem::transmute(args) };
+            let arg_slice: &[Value] = if arg_count > 0 {
+                unsafe { slice::from_raw_parts(args, arg_count as usize) }
+            } else {
+                &[]
+            };
+            
+            f(&Context{handle:context}, arg_slice)
+        }
+
+        let result = unsafe { ffi::sqlite3_create_function(
+            self.db.handle,
+            str_charstar(name).as_ptr(),
+            narg as c_int,
+            1, // SQLITE_UTF8
+            mem::transmute(f),
+            Some(run_function::<F>),
+            None,
+            None,
+        ) };
+        decode_result(result, "sqlite3_create_function", maybe(self.detailed, self.db.handle))
     }
 }
 
@@ -723,10 +775,32 @@ mod test_opening {
     // TODO: _v2 with flags
 }
 
+// TODO: lifetime
+/// A type-agnostic, read-only value returned from the database
+#[repr(C)]
+pub struct Value {
+    handle: *mut ffi::sqlite3_value
+}
+impl Value {
+    /// Interpret this value as a f64
+    pub fn as_f64(&self) -> f64 {
+        (unsafe { ffi::sqlite3_value_double(self.handle) }) as f64
+    }
+}
+
+pub struct Context {
+    handle: *mut ffi::sqlite3_context
+}
+impl Context {
+    pub fn result_f64(&self, value: f64) {
+        unsafe { ffi::sqlite3_result_double(self.handle, value) }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
-    use super::{DatabaseConnection, SqliteResult, ResultSet};
+    use super::{DatabaseConnection, SqliteResult, ResultSet, Value, Context};
     use std::str;
 
     #[test]
@@ -825,6 +899,26 @@ mod tests {
         let row = rows.step().unwrap().unwrap();
         assert_eq!(row.column_str(0), None);
         assert!(str::from_utf8(&[0x45u8, 0x46, 0xff]).is_err());
+    }
+    
+    fn foozle(context: &Context, args: &[Value]) {
+        let mut sum = 0.0;
+        for arg in args.iter() {
+            sum += arg.as_f64();
+        }
+        
+        context.result_f64(sum);
+    }
+    
+    #[test]
+    fn create_function() {
+        let mut db = DatabaseConnection::in_memory().unwrap();
+        db.create_function("foo", 2, &foozle);
+        
+        let mut stmt = db.prepare("SELECT foo(2.5, 6.6)").unwrap();
+        let mut rows = stmt.execute();
+        let row = rows.step().unwrap().unwrap();
+        assert_eq!(row.column_double(0), 2.5 + 6.6);
     }
 
 }
