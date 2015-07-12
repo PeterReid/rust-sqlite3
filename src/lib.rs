@@ -100,7 +100,7 @@ use std::fmt::Display;
 use std::fmt;
 
 pub use core::Access;
-pub use core::{DatabaseConnection, PreparedStatement, ResultSet, ResultRow, Value};
+pub use core::{DatabaseConnection, PreparedStatement, ResultSet, ResultRow, Value, Context};
 pub use core::{ColIx, ParamIx};
 pub use types::{FromSql, ToSql};
 
