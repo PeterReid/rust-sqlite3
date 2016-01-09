@@ -800,6 +800,20 @@ impl Context {
     pub fn result_f64(&self, value: f64) {
         unsafe { ffi::sqlite3_result_double(self.handle, value) }
     }
+    
+    pub fn result_null(&self) {
+        unsafe { ffi::sqlite3_result_null(self.handle) }
+    }
+    
+    pub fn result_blob(&self, value: &[u8]) {
+        let transient = unsafe { mem::transmute(-1 as isize) };
+        unsafe { ffi::sqlite3_result_blob(
+            self.handle, 
+            mem::transmute(value.as_ptr()), 
+            value.len() as c_int, 
+            transient
+        )}
+    }
 }
 
 
