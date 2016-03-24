@@ -31,7 +31,6 @@
 //!         let mut stmt = try!(conn.prepare(
 //!             "insert into items (id, description, price)
 //!            values (1, 'stuff', 10)"));
-//!            values (1, 'stuff', 10)"));
 //!         let mut results = stmt.execute();
 //!         match try!(results.step()) {
 //!             None => (),
