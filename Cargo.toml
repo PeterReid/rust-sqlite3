@@ -29,4 +29,4 @@ enum_primitive = "*"
 libc = "*"
 
 [dependencies.time]
-time = "0.1.5"
+time = "0.1.*"
