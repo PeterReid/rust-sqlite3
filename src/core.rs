@@ -207,7 +207,9 @@ impl From<NulError> for SqliteError {
     }
 }
 
+/// A body of a function callable from sqlite
 pub trait FunctionCallable {
+    /// Function body
     fn handle(&self, args: &[Value]);
 }
 
@@ -254,8 +256,8 @@ impl DatabaseConnection {
         struct InMemory;
         impl Access for InMemory {
             fn open(self, db: *mut *mut ffi::sqlite3) -> c_int {
-                let c_memory = str_charstar(":memory:").as_ptr();
-                unsafe { ffi::sqlite3_open(c_memory, db) }
+                let c_memory = str_charstar(":memory:");
+                unsafe { ffi::sqlite3_open(c_memory.as_ptr(), db) }
             }
         }
         DatabaseConnection::new(InMemory)
@@ -277,12 +279,12 @@ impl DatabaseConnection {
                                     -> SqliteResult<(PreparedStatement, usize)> {
         let mut stmt = ptr::null_mut();
         let mut tail = ptr::null();
-        let z_sql = str_charstar(sql).as_ptr();
+        let z_sql = str_charstar(sql);
         let n_byte = sql.len() as c_int;
-        let r = unsafe { ffi::sqlite3_prepare_v2(self.db.handle, z_sql, n_byte, &mut stmt, &mut tail) };
+        let r = unsafe { ffi::sqlite3_prepare_v2(self.db.handle, z_sql.as_ptr(), n_byte, &mut stmt, &mut tail) };
         match decode_result(r, "sqlite3_prepare_v2", maybe(self.detailed, self.db.handle)) {
             Ok(()) => {
-                let offset = tail as usize - z_sql as usize;
+                let offset = tail as usize - z_sql.as_ptr() as usize;
                 Ok((PreparedStatement { stmt: stmt , db: self.db.clone(), detailed: self.detailed }, offset))
             },
             Err(code) => Err(code)
@@ -384,9 +386,10 @@ impl DatabaseConnection {
             f(&Context{handle:context}, arg_slice)
         }
 
+        let name_cstring = str_charstar(name);
         let result = unsafe { ffi::sqlite3_create_function(
             self.db.handle,
-            str_charstar(name).as_ptr(),
+            name_cstring.as_ptr(),
             narg as c_int,
             1, // SQLITE_UTF8
             mem::transmute(f),
@@ -512,9 +515,9 @@ impl PreparedStatement {
         let ix = i as c_int;
         // SQLITE_TRANSIENT => SQLite makes a copy
         let transient = unsafe { mem::transmute(-1 as isize) };
-        let c_value = str_charstar(value).as_ptr();
+        let c_value = str_charstar(value);
         let len = value.len() as c_int;
-        let r = unsafe { ffi::sqlite3_bind_text(self.stmt, ix, c_value, len, transient) };
+        let r = unsafe { ffi::sqlite3_bind_text(self.stmt, ix, c_value.as_ptr(), len, transient) };
         decode_result(r, "sqlite3_bind_text", self.detail_db())
     }
 
@@ -792,18 +795,22 @@ impl Value {
     }
 }
 
+/// The context in which an SQLite function executes is stored in a Context.
 pub struct Context {
     handle: *mut ffi::sqlite3_context
 }
 impl Context {
+    /// Set the result of the function to the given `f64`
     pub fn result_f64(&self, value: f64) {
         unsafe { ffi::sqlite3_result_double(self.handle, value) }
     }
     
+    /// Set the result of the function to an SQL null
     pub fn result_null(&self) {
         unsafe { ffi::sqlite3_result_null(self.handle) }
     }
     
+    /// Set the result of the function to the given blob
     pub fn result_blob(&self, value: &[u8]) {
         let transient = unsafe { mem::transmute(-1 as isize) };
         unsafe { ffi::sqlite3_result_blob(
@@ -931,7 +938,7 @@ mod tests {
     #[test]
     fn create_function() {
         let mut db = DatabaseConnection::in_memory().unwrap();
-        db.create_function("foo", 2, &foozle);
+        db.create_function("foo", 2, &foozle).expect("create function failed");
         
         let mut stmt = db.prepare("SELECT foo(2.5, 6.6)").unwrap();
         let mut rows = stmt.execute();
