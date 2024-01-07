@@ -7,8 +7,6 @@ use super::{
 };
 use super::ColumnType::SQLITE_NULL;
 
-use time;
-
 /// Values that can be bound to parameters in prepared statements.
 pub trait ToSql {
     /// Bind the `ix`th parameter to this value (`self`).
@@ -125,51 +123,8 @@ impl<'a> FromSql<'a> for &'a [u8] {
     }
 }
 
-
-/// Format of sqlite date strings
-///
-/// From [Date And Time Functions][lang_datefunc]:
-/// > The datetime() function returns "YYYY-MM-DD HH:MM:SS"
-/// [lang_datefunc]: http://www.sqlite.org/lang_datefunc.html
-pub static SQLITE_TIME_FMT: &'static str = "%F %T";
-
-impl<'a> FromSql<'a> for time::Tm {
-    fn from_sql(row: &'a ResultRow, col: ColIx) -> SqliteResult<time::Tm> {
-        let txt = row.column_text(col).unwrap_or(String::new());
-        Ok( try!(time::strptime(txt.as_ref(), SQLITE_TIME_FMT)) )
-    }
-}
-
-impl From<time::ParseError> for SqliteError {
-    fn from(err: time::ParseError) -> SqliteError {
-        SqliteError {
-            kind: SqliteErrorCode::SQLITE_MISMATCH,
-            desc: "Time did not match expected format",
-            detail: Some(format!("Time parsing error: {}", err)),
-        }
-    }
-}
-
-impl ToSql for time::Timespec {
-    fn to_sql(&self, s: &mut PreparedStatement, ix: ParamIx) -> SqliteResult<()> {
-        let timestr = time::at_utc(*self).strftime(SQLITE_TIME_FMT)
-            .unwrap() // unit tests ensure SQLITE_TIME_FMT is ok
-            .to_string();
-        s.bind_text(ix, timestr.as_ref())
-    }
-}
-
-impl<'a> FromSql<'a> for time::Timespec {
-    /// TODO: propagate error message
-    fn from_sql(row: &'a ResultRow, col: ColIx) -> SqliteResult<time::Timespec> {
-        let tmo: SqliteResult<time::Tm> = FromSql::from_sql(row, col);
-        tmo.map(|tm| tm.to_timespec())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use time::Tm;
     use super::super::{DatabaseConnection, SqliteResult, ResultSet};
     use super::super::{ResultRowAccess};
 
@@ -180,52 +135,6 @@ mod tests {
         let mut s = try!(db.prepare(sql));
         let mut rows = s.execute();
         Ok(f(&mut rows))
-    }
-
-    #[test]
-    fn get_tm() {
-        fn go() -> SqliteResult<()> {
-            let conn = try!(DatabaseConnection::in_memory());
-            let mut stmt = try!(
-                conn.prepare("select datetime('2001-01-01', 'weekday 3', '3 hours')"));
-            let mut results = stmt.execute();
-            match results.step() {
-                Ok(Some(ref mut row)) => {
-                    assert_eq!(
-                        row.get::<u32, Tm>(0),
-                        Tm { tm_sec: 0,
-                             tm_min: 0,
-                             tm_hour: 3,
-                             tm_mday: 3,
-                             tm_mon: 0,
-                             tm_year: 101,
-                             tm_wday: 0,
-                             tm_yday: 0,
-                             tm_isdst: 0,
-                             tm_utcoff: 0,
-                             tm_nsec: 0
-                        });
-                    Ok(())
-                },
-                Ok(None) => panic!("no row"),
-                Err(oops) =>  panic!("error: {:?}", oops)
-            }
-        }
-        go().unwrap();
-    }
-
-    #[test]
-    fn get_invalid_tm() {
-        with_query("select 'not a time'", |results| {
-            match results.step() {
-                Ok(Some(ref mut row)) => {
-                    let x : SqliteResult<Tm> = row.get_opt(0u32);
-                    assert!(x.is_err());
-                },
-                Ok(None) => panic!("no row"),
-                Err(oops) =>  panic!("error: {:?}", oops)
-            };
-        }).unwrap();
     }
 
     #[test]

@@ -105,7 +105,8 @@ use std::slice;
 use std::str;
 use std::ffi::CStr;
 use std::rc::Rc;
-use time::Duration;
+use std::time::Duration;
+use std::cmp::{min, max};
 
 use self::SqliteOk::SQLITE_OK;
 use self::Step::{SQLITE_ROW, SQLITE_DONE};
@@ -340,7 +341,7 @@ impl DatabaseConnection {
     /// Set a busy timeout and clear any previously set handler.
     /// If duration is zero or negative, turns off busy handler.
     pub fn busy_timeout(&mut self, d: Duration) -> SqliteResult<()> {
-        let ms = d.num_milliseconds() as i32;
+        let ms = min(d.as_millis(), i32::MAX as u128) as i32;
         let result = unsafe { ffi::sqlite3_busy_timeout(self.db.handle, ms) };
         decode_result(result, "sqlite3_busy_timeout", maybe(self.detailed, self.db.handle))
     }
