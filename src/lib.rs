@@ -4,7 +4,6 @@
 //!
 //! Three layers of API are provided:
 //!
-//!  - `mod ffi` provides exhaustive, though unsafe, [bindgen] bindings for `libsqlite.h`.
 //!  - `mod core` provides a minimal safe interface to the basic sqlite3 API.
 //!  - `mod types` provides `ToSql`/`FromSql` traits, and the library provides
 //!     convenient `query()` and `update()` APIs.
@@ -13,7 +12,7 @@
 //!
 //! The following example demonstrates opening a database, executing
 //! DDL, and using the high-level `query()` and `update()` API. Note the
-//! use of `Result` and `try!()` for error handling.
+//! use of `Result` and `?` for error handling.
 //!
 //! ```rust
 //! extern crate sqlite3;
@@ -38,40 +37,40 @@
 //! pub fn main() {
 //!     match io() {
 //!         Ok(ppl) => println!("Found people: {:?}", ppl),
-//!         Err(oops) => panic!(oops)
+//!         Err(oops) => panic!("{}", oops)
 //!     }
 //! }
 //! 
 //! fn io() -> SqliteResult<Vec<Person>> {
-//!     let mut conn = try!(DatabaseConnection::in_memory());
+//!     let mut conn = DatabaseConnection::in_memory()?;
 //! 
-//!     try!(conn.exec("CREATE TABLE person (
+//!     conn.exec("CREATE TABLE person (
 //!                  id              SERIAL PRIMARY KEY,
 //!                  name            VARCHAR NOT NULL
-//!                )"));
+//!                )")?;
 //! 
 //!     let me = Person {
 //!         id: 0,
 //!         name: format!("Dan"),
 //!     };
 //!     {
-//!         let mut tx = try!(conn.prepare("INSERT INTO person (name)
-//!                            VALUES ($1, $2)"));
-//!         let changes = try!(tx.update(&[&me.name]));
+//!         let mut tx = conn.prepare("INSERT INTO person (name)
+//!                            VALUES ($1)")?;
+//!         let changes = tx.update(&[&me.name])?;
 //!         assert_eq!(changes, 1);
 //!     }
 //! 
-//!     let mut stmt = try!(conn.prepare("SELECT id, name FROM person"));
+//!     let mut stmt = conn.prepare("SELECT id, name FROM person")?;
 //! 
 //!     let mut ppl = vec!();
-//!     try!(stmt.query(
+//!     stmt.query(
 //!         &[], &mut |row| {
 //!             ppl.push(Person {
 //!                 id: row.get("id"),
 //!                 name: row.get("name")
 //!             });
 //!             Ok(())
-//!         }));
+//!         })?;
 //!     Ok(ppl)
 //! }
 //! ```
@@ -107,7 +106,6 @@ pub mod types;
 #[allow(dead_code)]
 #[allow(missing_docs)]
 #[allow(missing_copy_implementations)]  // until I figure out rust-bindgen #89
-pub mod ffi;
 
 pub mod access;
 
@@ -115,7 +113,7 @@ pub mod access;
 pub trait StatementUpdate {
     /// Execute a statement after binding any parameters.
     fn update(&mut self,
-              values: &[&ToSql]) -> SqliteResult<u64>;
+              values: &[&dyn ToSql]) -> SqliteResult<u64>;
 }
 
 
@@ -131,11 +129,11 @@ impl StatementUpdate for core::PreparedStatement {
     ///
     /// [changes]: http://www.sqlite.org/c3ref/changes.html
     fn update(&mut self,
-              values: &[&ToSql]) -> SqliteResult<u64> {
+              values: &[&dyn ToSql]) -> SqliteResult<u64> {
         let check = {
-            try!(bind_values(self, values));
+            bind_values(self, values)?;
             let mut results = self.execute();
-            match try!(results.step()) {
+            match results.step()? {
                 None => Ok(()),
                 Some(_row) => Err(SqliteError {
                     kind: SQLITE_MISUSE,
@@ -155,7 +153,7 @@ pub trait Query<F>
 {
     /// Process rows from a query after binding parameters.
     fn query(&mut self,
-             values: &[&ToSql],
+             values: &[&dyn ToSql],
              each_row: &mut F
              ) -> SqliteResult<()>;
 }
@@ -168,26 +166,26 @@ impl<F> Query<F> for core::PreparedStatement
     /// For call `each_row(row)` for each resulting step,
     /// exiting on `Err`.
     fn query(&mut self,
-             values: &[&ToSql],
+             values: &[&dyn ToSql],
              each_row: &mut F
              ) -> SqliteResult<()>
     {
-        try!(bind_values(self, values));
+        bind_values(self, values)?;
         let mut results = self.execute();
         loop {
-            match try!(results.step()) {
+            match results.step()? {
                 None => break,
-                Some(ref mut row) => try!(each_row(row)),
+                Some(ref mut row) => each_row(row)?,
             }
         }
         Ok(())
     }
 }
 
-fn bind_values(s: &mut PreparedStatement, values: &[&ToSql]) -> SqliteResult<()> {
+fn bind_values(s: &mut PreparedStatement, values: &[&dyn ToSql]) -> SqliteResult<()> {
     for (ix, v) in values.iter().enumerate() {
         let p = ix as ParamIx + 1;
-        try!(v.to_sql(s, p));
+        v.to_sql(s, p)?;
     }
     Ok(())
 }
@@ -328,7 +326,7 @@ impl SqliteError {
 
 impl Error for SqliteError {
     fn description(&self) -> &str { self.desc }
-    fn cause(&self) -> Option<&Error> { None }
+    fn cause(&self) -> Option<&dyn Error> { None }
 }
 
 
@@ -355,27 +353,27 @@ mod bind_tests {
     #[test]
     fn bind_fun() {
         fn go() -> SqliteResult<()> {
-            let mut database = try!(DatabaseConnection::in_memory());
+            let mut database = DatabaseConnection::in_memory()?;
 
-            try!(database.exec(
+            database.exec(
                 "BEGIN;
                 CREATE TABLE test (id int, name text, address text);
                 INSERT INTO test (id, name, address) VALUES (1, 'John Doe', '123 w Pine');
-                COMMIT;"));
+                COMMIT;")?;
 
             {
-                let mut tx = try!(database.prepare(
-                    "INSERT INTO test (id, name, address) VALUES (?, ?, ?)"));
+                let mut tx = database.prepare(
+                    "INSERT INTO test (id, name, address) VALUES (?, ?, ?)")?;
                 assert_eq!(tx.bind_parameter_count(), 3);
-                try!(tx.bind_int(1, 2));
-                try!(tx.bind_text(2, "Jane Doe"));
-                try!(tx.bind_text(3, "345 e Walnut"));
+                tx.bind_int(1, 2)?;
+                tx.bind_text(2, "Jane Doe")?;
+                tx.bind_text(3, "345 e Walnut")?;
                 let mut results = tx.execute();
                 assert!(results.step().ok().unwrap().is_none());
             }
             assert_eq!(database.changes(), 1);
 
-            let mut q = try!(database.prepare("select * from test order by id"));
+            let mut q = database.prepare("select * from test order by id")?;
             let mut rows = q.execute();
             match rows.step() {
                 Ok(Some(ref mut row)) => {
@@ -405,8 +403,8 @@ mod bind_tests {
     fn with_query<T, F>(sql: &str, mut f: F) -> SqliteResult<T>
         where F: FnMut(&mut ResultSet) -> T
     {
-        let db = try!(DatabaseConnection::in_memory());
-        let mut s = try!(db.prepare(sql));
+        let db = DatabaseConnection::in_memory()?;
+        let mut s = db.prepare(sql)?;
         let mut rows = s.execute();
         let x = f(&mut rows);
         return Ok(x);
@@ -439,7 +437,7 @@ mod bind_tests {
     #[test]
     fn err_with_detail() {
         let io = || {
-            let mut conn = try!(DatabaseConnection::in_memory());
+            let mut conn = DatabaseConnection::in_memory()?;
             conn.exec("CREATE gobbledygook")
         };
 

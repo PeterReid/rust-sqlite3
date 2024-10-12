@@ -13,7 +13,9 @@ use std::ptr;
 
 use super::SqliteResult;
 use core::{Access, DatabaseConnection, str_charstar};
-use ffi;
+
+
+extern crate sqlite3_sys as ffi;
 
 use access::flags::OpenFlags;
 

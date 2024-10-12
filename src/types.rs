@@ -3,7 +3,7 @@
 use super::{PreparedStatement, ResultRow,
             ColIx, ParamIx};
 use super::{
-    SqliteResult, SqliteErrorCode, SqliteError,
+    SqliteResult,
 };
 use super::ColumnType::SQLITE_NULL;
 

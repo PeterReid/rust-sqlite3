@@ -47,7 +47,7 @@ fn typical_usage(conn: &mut DatabaseConnection) -> SqliteResult<String> {
 
                 Ok(format!("row: {}, {}, {}", id, desc_opt, price))
             },
-            Err(oops) => panic!(oops),
+            Err(oops) => std::panic::panic_any(oops),
             Ok(None) => panic!("where did our row go?")
         };
         res
@@ -65,6 +65,6 @@ pub fn main() {
                 }
             }
         },
-        Err(oops) => panic!(oops)
+        Err(oops) => std::panic::panic_any(oops)
     }
 }

@@ -106,7 +106,9 @@ use std::str;
 use std::ffi::CStr;
 use std::rc::Rc;
 use std::time::Duration;
-use std::cmp::{min, max};
+use std::cmp::{min};
+
+extern crate sqlite3_sys as ffi;
 
 use self::SqliteOk::SQLITE_OK;
 use self::Step::{SQLITE_ROW, SQLITE_DONE};
@@ -119,8 +121,6 @@ pub use super::{
 
 pub use super::ColumnType;
 pub use super::ColumnType::SQLITE_NULL;
-
-use ffi; // TODO: move to sqlite3-sys crate
 
 
 /// Successful result
@@ -319,7 +319,7 @@ impl DatabaseConnection {
     ///  - TODO: callback support?
     ///  - TODO: errmsg support
     pub fn exec(&mut self, sql: &str) -> SqliteResult<()> {
-        let c_sql = try!(std_ffi::CString::new(sql.as_bytes()));
+        let c_sql = std_ffi::CString::new(sql.as_bytes())?;
         let result = unsafe {
             ffi::sqlite3_exec(self.db.handle, c_sql.as_ptr(), None,
                               ptr::null_mut(), ptr::null_mut())
@@ -759,8 +759,8 @@ fn error_result(
 #[cfg(test)]
 mod test_opening {
     use super::{DatabaseConnection, SqliteResult};
-    use time::Duration;
-
+    use std::time::Duration;
+    
     #[test]
     fn db_construct_typechecks() {
         assert!(DatabaseConnection::in_memory().is_ok())
@@ -769,8 +769,8 @@ mod test_opening {
     #[test]
     fn db_busy_timeout() {
         fn go() -> SqliteResult<()> {
-            let mut db = try!(DatabaseConnection::in_memory());
-            db.busy_timeout(Duration::seconds(2))
+            let mut db = DatabaseConnection::in_memory()?;
+            db.busy_timeout(Duration::from_secs(2))
         }
         go().unwrap();
     }
@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn stmt_new_types() {
         fn go() -> SqliteResult<()> {
-            let db = try!(DatabaseConnection::in_memory());
+            let db = DatabaseConnection::in_memory()?;
             let res = db.prepare("select 1 + 1").map( |_s| () );
             res
         }
@@ -843,8 +843,8 @@ mod tests {
     fn with_query<T, F>(sql: &str, mut f: F) -> SqliteResult<T>
         where F: FnMut(&mut ResultSet) -> T
     {
-        let db = try!(DatabaseConnection::in_memory());
-        let mut s = try!(db.prepare(sql));
+        let db = DatabaseConnection::in_memory()?;
+        let mut s = db.prepare(sql)?;
         let mut rows = s.execute();
         Ok(f(&mut rows))
     }
@@ -888,8 +888,8 @@ mod tests {
     #[test]
     fn detailed_errors() {
         let go = || -> SqliteResult<()> {
-            let db = try!(DatabaseConnection::in_memory());
-            try!(db.prepare("select bogus"));
+            let db = DatabaseConnection::in_memory()?;
+            db.prepare("select bogus")?;
             Ok( () )
         };
         let err = go().err().unwrap();
@@ -899,9 +899,9 @@ mod tests {
     #[test]
     fn no_alloc_errors_db() {
         let go = || {
-            let mut db = try!(DatabaseConnection::in_memory());
+            let mut db = DatabaseConnection::in_memory()?;
             db.ignore_detail();
-            try!(db.prepare("select bogus"));
+            db.prepare("select bogus")?;
             Ok( () )
         };
         let x: SqliteResult<()> = go();
